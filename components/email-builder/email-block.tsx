@@ -17,6 +17,8 @@ import {
   AlignCenter,
   AlignRight,
 } from "lucide-react"
+import { ProductGrid } from "./product-grid"
+import { ProductSearchDialog } from "./product-search-dialog"
 
 interface EmailBlockProps {
   block: BlockContent
@@ -26,6 +28,7 @@ export function EmailBlock({ block }: EmailBlockProps) {
   const { updateBlock } = useEmailBuilder()
   const [editableContent, setEditableContent] = useState("")
   const [isEditing, setIsEditing] = useState(false)
+  const [searchDialogOpen, setSearchDialogOpen] = useState(false)
   const editorRef = useRef<HTMLDivElement>(null)
   const toolbarRef = useRef<HTMLDivElement>(null)
   const [toolbarPosition, setToolbarPosition] = useState({ top: 0, left: 0 })
@@ -93,6 +96,36 @@ export function EmailBlock({ block }: EmailBlockProps) {
     if (editorRef.current) {
       // Update the editable content after formatting
       setEditableContent(editorRef.current.innerHTML)
+    }
+  }
+
+  const handleAddProduct = (product: any) => {
+    if (block.type === "product") {
+      const updatedProducts = [...(block.content.products || []), product]
+      updateBlock(block.id, {
+        ...block.content,
+        products: updatedProducts,
+      })
+    }
+  }
+
+  const handleRemoveProduct = (index: number) => {
+    if (block.type === "product") {
+      const updatedProducts = [...block.content.products]
+      updatedProducts.splice(index, 1)
+      updateBlock(block.id, {
+        ...block.content,
+        products: updatedProducts,
+      })
+    }
+  }
+
+  const handleReorderProducts = (newOrder: any[]) => {
+    if (block.type === "product") {
+      updateBlock(block.id, {
+        ...block.content,
+        products: newOrder,
+      })
     }
   }
 
@@ -294,50 +327,24 @@ export function EmailBlock({ block }: EmailBlockProps) {
               padding: block.styles.padding,
               backgroundColor: block.styles.backgroundColor || "#ffffff",
               borderRadius: block.styles.borderRadius || "0",
-              textAlign: (block.styles.textAlign as any) || "center",
             }}
           >
-            <div className="flex flex-wrap">
-              {block.content.products.slice(0, block.content.columns).map((product: any, index: number) => (
-                <div key={index} className="p-2" style={{ width: `${100 / block.content.columns}%` }}>
-                  <img
-                    src={product.selectedImage || product.media?.default?.src || product.imageUrl || "/placeholder.svg"}
-                    alt={product.titles?.default || product.name || "Product"}
-                    className="w-full h-auto"
-                  />
+            <ProductGrid
+              products={block.content.products}
+              columns={block.content.columns}
+              showName={block.content.showName}
+              showPrice={block.content.showPrice}
+              showSwatch={block.content.showSwatch}
+              onAddProduct={() => setSearchDialogOpen(true)}
+              onRemoveProduct={handleRemoveProduct}
+              onReorderProducts={handleReorderProducts}
+            />
 
-                  {block.content.showName && (
-                    <h3 className="mt-2 mb-1 font-bold text-sm">
-                      {product.titles?.default || product.name || "Product"}
-                    </h3>
-                  )}
-
-                  {block.content.showPrice && (
-                    <p className="text-sm">
-                      £{product.pricing.price.toFixed(2)}
-                      {product.pricing.was && (
-                        <span className="ml-1 text-red-500 line-through">£{product.pricing.was.toFixed(2)}</span>
-                      )}
-                    </p>
-                  )}
-
-                  {block.content.showSwatch &&
-                    product.properties?.swatches &&
-                    product.properties.swatches.length > 0 && (
-                      <div className="flex mt-1 space-x-1">
-                        {product.properties.swatches.map((swatch: any) => (
-                          <span
-                            key={swatch.id}
-                            className="inline-block w-3 h-3 rounded-full"
-                            style={{ backgroundColor: swatch.hex }}
-                            title={swatch.colour}
-                          />
-                        ))}
-                      </div>
-                    )}
-                </div>
-              ))}
-            </div>
+            <ProductSearchDialog
+              open={searchDialogOpen}
+              onOpenChange={setSearchDialogOpen}
+              onAddProduct={handleAddProduct}
+            />
           </div>
         )
 

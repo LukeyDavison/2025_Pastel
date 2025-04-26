@@ -27,6 +27,3 @@ interface AdCreatorButtonProps {
 export function AdCreatorButton({ onClose }: AdCreatorButtonProps) {
   return <AffiliateAdCreatorModal onClose={onClose} />
 }
-
-// Add default export for dynamic import
-export default { AdCreatorButton }

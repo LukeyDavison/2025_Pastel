@@ -1,14 +1,54 @@
 "use client"
 
-import { useState, useCallback } from "react"
-import { Button, ErrorDisplay } from "@/components/ui" // Updated import
+import { useState, useCallback, useEffect } from "react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { SearchBar } from "@/components/product-search/search-bar"
 import { SearchResults } from "@/components/product-search/search-results"
-import { Badge } from "@/components/ui" // Updated import
-import { Check, X } from "lucide-react"
+import { BundleManager } from "@/components/product-search/bundle-manager"
+import { CatalogManager } from "@/components/product-search/catalog-manager"
+import { Check, X, Save, Package, Database, Plus, AlertCircle } from "lucide-react"
 import { useErrorHandler } from "@/hooks/use-error-handler"
 import { safeFetch } from "@/lib/error-handling/api-error-handler"
 import { logInfo, logError } from "@/lib/error-handling/error-logger"
+import { initCatalog, saveCatalog, addProductsToCatalog, searchCatalog } from "@/utils/catalog-utils"
+
+// Create a simple ErrorDisplay component since we can't import it from components/ui
+function ErrorDisplay({ message, severity = "error", compact = false, onDismiss, onRetry }) {
+  return (
+    <div
+      className={`rounded-md border p-3 ${severity === "error" ? "bg-red-50 border-red-200 text-red-800" : "bg-amber-50 border-amber-200 text-amber-800"}`}
+    >
+      <div className="flex items-center">
+        <div className="flex-shrink-0">
+          {severity === "error" ? (
+            <span className="h-5 w-5 text-red-500">⚠️</span>
+          ) : (
+            <span className="h-5 w-5 text-amber-500">ℹ️</span>
+          )}
+        </div>
+        <div className="ml-3 flex-1">
+          <p className="text-sm">{message}</p>
+        </div>
+        <div className="flex-shrink-0 flex gap-2">
+          {onRetry && (
+            <button
+              onClick={onRetry}
+              className="text-sm bg-white px-2 py-1 rounded border border-gray-300 hover:bg-gray-50"
+            >
+              Retry
+            </button>
+          )}
+          {onDismiss && (
+            <button onClick={onDismiss} className="text-sm text-gray-500 hover:text-gray-700">
+              Dismiss
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
 
 export default function Home() {
   const [searchTerm, setSearchTerm] = useState("")
@@ -17,11 +57,21 @@ export default function Home() {
   const [hasSearched, setHasSearched] = useState(false)
   const [selectedProducts, setSelectedProducts] = useState([])
   const [multiSelectMode, setMultiSelectMode] = useState(false)
+  const [isBundleManagerOpen, setIsBundleManagerOpen] = useState(false)
+  const [isCatalogManagerOpen, setIsCatalogManagerOpen] = useState(false)
+  const [catalog, setCatalog] = useState(null)
+  const [usingCatalogFallback, setUsingCatalogFallback] = useState(false)
+  const [apiAvailable, setApiAvailable] = useState(true)
 
   // Use our error handler hook
   const { error, handleError, clearError } = useErrorHandler({
     component: "ProductSearch",
   })
+
+  // Initialize catalog on mount
+  useEffect(() => {
+    setCatalog(initCatalog())
+  }, [])
 
   // Function to search for products
   const searchProducts = useCallback(
@@ -31,44 +81,106 @@ export default function Home() {
       setIsLoading(true)
       clearError()
       setHasSearched(true)
+      setUsingCatalogFallback(false)
 
       try {
+        // If we know the API is unavailable, go straight to catalog search
+        if (!apiAvailable && catalog) {
+          const catalogResults = searchCatalog(catalog, term)
+          setResults(catalogResults)
+          setUsingCatalogFallback(true)
+          logInfo(
+            `Using catalog directly (API unavailable): found ${catalogResults.length} products for "${term}"`,
+            {},
+            "ProductSearch",
+          )
+          setIsLoading(false)
+          return
+        }
+
         logInfo(`Searching for products with term: ${term}`, {}, "ProductSearch")
 
-        const data = await safeFetch(
-          "/api/product-search",
-          {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
+        try {
+          const data = await safeFetch(
+            "/api/product-search",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({ search_text: term }),
+              cache: "no-store",
             },
-            body: JSON.stringify({ search_text: term }),
-            cache: "no-store",
-          },
-          "ProductSearch",
-        )
+            "ProductSearch",
+          )
 
-        if (!data.success) {
-          throw new Error(data.error || "Search failed")
-        }
+          if (!data.success) {
+            throw new Error(data.error || "Search failed")
+          }
 
-        if (Array.isArray(data.products)) {
-          setResults(data.products)
-          logInfo(`Found ${data.products.length} products for "${term}"`, {}, "ProductSearch")
-        } else {
-          logError("Unexpected response format", { data }, "ProductSearch")
-          setResults([])
-          throw new Error("Invalid response format")
+          if (Array.isArray(data.products)) {
+            setResults(data.products)
+            logInfo(`Found ${data.products.length} products for "${term}"`, {}, "ProductSearch")
+            setApiAvailable(true) // API is working
+          } else {
+            logError("Unexpected response format", { data }, "ProductSearch")
+            setResults([])
+            throw new Error("Invalid response format")
+          }
+        } catch (err) {
+          // Mark API as unavailable for future searches
+          setApiAvailable(false)
+
+          // Try catalog as fallback
+          if (catalog) {
+            const catalogResults = searchCatalog(catalog, term)
+            if (catalogResults.length > 0) {
+              setResults(catalogResults)
+              setUsingCatalogFallback(true)
+              logInfo(
+                `Using catalog fallback: found ${catalogResults.length} products for "${term}"`,
+                {},
+                "ProductSearch",
+              )
+            } else {
+              handleError(err, "Failed to search products and no catalog results found")
+              setResults([])
+            }
+          } else {
+            handleError(err, "Failed to search products")
+            setResults([])
+          }
         }
       } catch (err) {
-        handleError(err, "Failed to search products")
+        handleError(err, "An unexpected error occurred")
         setResults([])
       } finally {
         setIsLoading(false)
       }
     },
-    [clearError, handleError],
+    [clearError, handleError, catalog, apiAvailable],
   )
+
+  // Search catalog directly
+  const searchCatalogDirectly = (term: string) => {
+    if (!catalog || !term.trim()) return
+
+    setIsLoading(true)
+    clearError()
+    setHasSearched(true)
+
+    try {
+      const catalogResults = searchCatalog(catalog, term)
+      setResults(catalogResults)
+      setUsingCatalogFallback(true)
+      logInfo(`Searched catalog directly: found ${catalogResults.length} products for "${term}"`, {}, "ProductSearch")
+    } catch (err) {
+      handleError(err, "Failed to search catalog")
+      setResults([])
+    } finally {
+      setIsLoading(false)
+    }
+  }
 
   // Handle product selection
   const handleProductSelect = (product, imageUrl) => {
@@ -94,6 +206,62 @@ export default function Home() {
     setSelectedProducts([])
   }
 
+  // Open bundle manager
+  const openBundleManager = () => {
+    setIsBundleManagerOpen(true)
+  }
+
+  // Close bundle manager
+  const closeBundleManager = () => {
+    setIsBundleManagerOpen(false)
+  }
+
+  // Open catalog manager
+  const openCatalogManager = () => {
+    setIsCatalogManagerOpen(true)
+  }
+
+  // Close catalog manager
+  const closeCatalogManager = () => {
+    setIsCatalogManagerOpen(false)
+  }
+
+  // Load products from a bundle
+  const handleLoadBundle = (products) => {
+    setSelectedProducts(products)
+  }
+
+  // Add selected products to catalog
+  const handleAddToCatalog = () => {
+    if (selectedProducts.length === 0 || !catalog) return
+
+    const updatedCatalog = addProductsToCatalog(catalog, selectedProducts)
+    setCatalog(updatedCatalog)
+    saveCatalog(updatedCatalog)
+
+    // Show confirmation
+    alert(`Added ${selectedProducts.length} products to your catalog`)
+  }
+
+  // Load products from catalog
+  const handleLoadFromCatalog = (products) => {
+    setSelectedProducts(products)
+  }
+
+  // Get catalog product count
+  const getCatalogCount = () => {
+    if (!catalog) return 0
+    return Object.keys(catalog.products).length
+  }
+
+  // Reset API availability and try again
+  const resetApiAvailability = () => {
+    setApiAvailable(true)
+    if (searchTerm) {
+      searchProducts(searchTerm)
+    }
+  }
+
   return (
     <main className="min-h-screen flex flex-col">
       <header className="bg-black/30 backdrop-blur-md p-4 shadow-lg border-b border-white/10">
@@ -105,15 +273,33 @@ export default function Home() {
               <SearchBar value={searchTerm} onChange={setSearchTerm} onSearch={searchProducts} isLoading={isLoading} />
             </div>
 
-            <Button
-              variant="cta"
-              size="sm"
-              onClick={() => setMultiSelectMode(!multiSelectMode)}
-              className={`whitespace-nowrap ${multiSelectMode ? "bg-white/20" : ""}`}
-            >
-              <Check className={`h-4 w-4 mr-1 ${multiSelectMode ? "opacity-100" : "opacity-50"}`} />
-              Multi-Select {multiSelectMode && selectedProducts.length > 0 && `(${selectedProducts.length})`}
-            </Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button
+                variant="cta"
+                size="sm"
+                onClick={() => setMultiSelectMode(!multiSelectMode)}
+                className={`whitespace-nowrap ${multiSelectMode ? "bg-white/20" : ""}`}
+              >
+                <Check className={`h-4 w-4 mr-1 ${multiSelectMode ? "opacity-100" : "opacity-50"}`} />
+                Multi-Select {multiSelectMode && selectedProducts.length > 0 && `(${selectedProducts.length})`}
+              </Button>
+
+              <Button variant="outline" size="sm" onClick={openBundleManager} className="whitespace-nowrap">
+                <Package className="h-4 w-4 mr-1" />
+                Bundles
+              </Button>
+
+              <Button
+                id="catalog-button"
+                variant="outline"
+                size="sm"
+                onClick={openCatalogManager}
+                className="whitespace-nowrap"
+              >
+                <Database className="h-4 w-4 mr-1" />
+                Catalog {getCatalogCount() > 0 && `(${getCatalogCount()})`}
+              </Button>
+            </div>
           </div>
 
           {/* Display error if there is one */}
@@ -128,6 +314,49 @@ export default function Home() {
               />
             </div>
           )}
+
+          {/* Display API unavailable notice */}
+          {!apiAvailable && (
+            <div className="mt-3 flex items-center gap-2 bg-red-500/20 text-red-200 px-3 py-2 rounded-md text-sm">
+              <AlertCircle className="h-4 w-4" />
+              <span>
+                API is currently unavailable. Using catalog for searches.
+                <button onClick={resetApiAvailability} className="underline ml-2 hover:text-white">
+                  Try API again
+                </button>
+              </span>
+            </div>
+          )}
+
+          {/* Display catalog fallback notice */}
+          {usingCatalogFallback && (
+            <div className="mt-3 flex items-center gap-2 bg-amber-500/20 text-amber-200 px-3 py-2 rounded-md text-sm">
+              <AlertCircle className="h-4 w-4" />
+              <span>
+                Showing results from your local catalog.
+                {apiAvailable && (
+                  <button
+                    onClick={() => searchTerm && searchProducts(searchTerm)}
+                    className="underline ml-2 hover:text-white"
+                  >
+                    Try API again
+                  </button>
+                )}
+              </span>
+            </div>
+          )}
+
+          {/* Catalog search option */}
+          {catalog && Object.keys(catalog.products).length > 0 && !usingCatalogFallback && apiAvailable && (
+            <div className="mt-3">
+              <button
+                onClick={() => searchTerm && searchCatalogDirectly(searchTerm)}
+                className="text-sm text-blue-300 hover:text-blue-200 underline"
+              >
+                Search in your catalog instead ({Object.keys(catalog.products).length} products)
+              </button>
+            </div>
+          )}
         </div>
       </header>
 
@@ -137,9 +366,19 @@ export default function Home() {
           <div className="bg-white/10 backdrop-blur-md rounded-lg border border-white/20 p-4 mb-4">
             <div className="flex items-center justify-between mb-2">
               <h3 className="text-white font-medium">Selected Products ({selectedProducts.length})</h3>
-              <Button variant="cta" size="sm" onClick={handleClearSelected} className="text-white">
-                Clear All
-              </Button>
+              <div className="flex gap-2 flex-wrap">
+                <Button variant="outline" size="sm" onClick={handleAddToCatalog} className="text-white">
+                  <Plus className="h-4 w-4 mr-1" />
+                  Add to Catalog
+                </Button>
+                <Button variant="outline" size="sm" onClick={openBundleManager} className="text-white">
+                  <Save className="h-4 w-4 mr-1" />
+                  Save Bundle
+                </Button>
+                <Button variant="cta" size="sm" onClick={handleClearSelected} className="text-white">
+                  Clear All
+                </Button>
+              </div>
             </div>
 
             <div className="flex flex-wrap gap-2 max-h-32 overflow-y-auto p-2 bg-black/20 rounded">
@@ -223,6 +462,21 @@ export default function Home() {
           </div>
         )}
       </div>
+
+      {/* Bundle Manager Dialog */}
+      <BundleManager
+        isOpen={isBundleManagerOpen}
+        onClose={closeBundleManager}
+        selectedProducts={selectedProducts}
+        onLoadBundle={handleLoadBundle}
+      />
+
+      {/* Catalog Manager Dialog */}
+      <CatalogManager
+        isOpen={isCatalogManagerOpen}
+        onClose={closeCatalogManager}
+        onSelectProducts={handleLoadFromCatalog}
+      />
     </main>
   )
 }

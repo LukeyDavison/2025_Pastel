@@ -1,126 +1,53 @@
-import { ApiError, NetworkError } from "./error-types"
-import { logException } from "./error-logger"
+import { logError, logInfo } from "./error-logger"
 
-/**
- * Handle API errors in a consistent way
- * @param error The error object
- * @param component The component where the error occurred
- * @returns A user-friendly error message and the original error
- */
-export const handleApiError = (error: any, component?: string): { message: string; error: Error } => {
-  let errorMessage = "An unexpected error occurred. Please try again."
-  let errorObject: Error
+// Enhanced fetch function with error handling and logging
+export async function safeFetch(url: string, options: RequestInit = {}, component = "API"): Promise<any> {
+  try {
+    logInfo(`Fetching ${url}`, { method: options.method || "GET" }, component)
 
-  // Network errors
-  if (error.name === "TypeError" && error.message === "Failed to fetch") {
-    errorMessage = "Unable to connect to the server. Please check your internet connection and try again."
-    errorObject = new NetworkError(errorMessage, { originalError: error }, component)
-  }
-  // Response errors
-  else if (error.status || error.statusCode) {
-    const status = error.status || error.statusCode
+    const response = await fetch(url, options)
 
-    switch (status) {
-      case 400:
-        errorMessage = "The request was invalid. Please check your input and try again."
-        break
-      case 401:
-        errorMessage = "You need to be logged in to perform this action."
-        break
-      case 403:
-        errorMessage = "You do not have permission to perform this action."
-        break
-      case 404:
-        errorMessage = "The requested resource was not found."
-        break
-      case 429:
-        errorMessage = "Too many requests. Please try again later."
-        break
-      case 500:
-      case 502:
-      case 503:
-      case 504:
-        errorMessage = "The server encountered an error. Please try again later."
-        break
-      default:
-        errorMessage = `Request failed with status ${status}. Please try again.`
+    // Handle non-OK responses
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => "Could not read error response")
+      const error = new Error(`HTTP error ${response.status}: ${errorText}`)
+
+      // Add response details to the error
+      Object.assign(error, {
+        status: response.status,
+        statusText: response.statusText,
+        url,
+      })
+
+      throw error
     }
 
-    errorObject = new ApiError(
-      errorMessage,
-      status,
+    // Parse JSON response
+    try {
+      const data = await response.json()
+      return data
+    } catch (parseError) {
+      logError(`Failed to parse JSON response from ${url}`, { parseError }, component)
+      throw new Error(`Invalid JSON response: ${parseError.message}`)
+    }
+  } catch (error) {
+    // Log the error with details
+    logError(
+      `API request failed: ${error.message}`,
       {
-        originalError: error,
-        responseBody: error.data || error.body || null,
+        url,
+        method: options.method || "GET",
+        status: error.status,
+        stack: error.stack,
       },
       component,
     )
-  }
-  // Other errors
-  else {
-    errorObject = new Error(error.message || errorMessage)
-  }
 
-  // Log the error
-  logException(errorObject, component)
-
-  return {
-    message: errorMessage,
-    error: errorObject,
-  }
-}
-
-/**
- * Safely parse JSON from API responses
- * @param response The fetch response object
- * @returns The parsed JSON data
- */
-export const safeJsonParse = async (response: Response): Promise<any> => {
-  try {
-    return await response.json()
-  } catch (error) {
-    throw new ApiError("Failed to parse API response", response.status, {
-      url: response.url,
-      statusText: response.statusText,
-    })
-  }
-}
-
-/**
- * Enhanced fetch function with error handling
- * @param url The URL to fetch
- * @param options Fetch options
- * @param component The component making the request
- * @returns The response data
- */
-export const safeFetch = async (url: string, options: RequestInit = {}, component?: string): Promise<any> => {
-  try {
-    const response = await fetch(url, options)
-
-    if (!response.ok) {
-      let errorData = {}
-
-      try {
-        errorData = await response.json()
-      } catch (e) {
-        // Ignore JSON parsing errors for error responses
-      }
-
-      throw new ApiError(
-        `API request failed with status ${response.status}`,
-        response.status,
-        {
-          url,
-          method: options.method || "GET",
-          errorData,
-        },
-        component,
-      )
+    // Return a standardized error response
+    return {
+      success: false,
+      error: error.message || "Unknown error occurred",
+      status: error.status || 500,
     }
-
-    return await safeJsonParse(response)
-  } catch (error) {
-    const { message, error: handledError } = handleApiError(error, component)
-    throw handledError
   }
 }

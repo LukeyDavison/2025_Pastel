@@ -1,81 +1,59 @@
 "use client"
 
 import { useState, useCallback } from "react"
-import { AppError } from "@/lib/error-handling/error-types"
-import { logException } from "@/lib/error-handling/error-logger"
+import { logError } from "@/lib/error-handling/error-logger"
 
 interface ErrorState {
   hasError: boolean
   message: string
-  code?: string
-  details?: Record<string, any>
+  details?: any
+  timestamp?: Date
 }
 
 interface ErrorHandlerOptions {
-  logErrors?: boolean
   component?: string
+  onError?: (error: Error, message: string) => void
 }
 
-/**
- * Hook for handling errors in React components
- */
 export function useErrorHandler(options: ErrorHandlerOptions = {}) {
-  const { logErrors = true, component } = options
   const [error, setError] = useState<ErrorState>({
     hasError: false,
     message: "",
   })
 
-  /**
-   * Handle an error and update the error state
-   */
   const handleError = useCallback(
-    (err: unknown, customMessage?: string) => {
-      let errorMessage = customMessage || "An unexpected error occurred"
-      let errorCode: string | undefined
-      let errorDetails: Record<string, any> | undefined
+    (err: Error | string, userMessage?: string) => {
+      const errorObj = typeof err === "string" ? new Error(err) : err
+      const displayMessage = userMessage || errorObj.message || "An unexpected error occurred"
 
-      if (err instanceof AppError) {
-        errorMessage = err.message
-        errorCode = err.code
-        errorDetails = err.context
+      // Log the error
+      logError(
+        displayMessage,
+        {
+          originalError: errorObj,
+          stack: errorObj.stack,
+        },
+        options.component || "App",
+      )
 
-        if (logErrors) {
-          logException(err, component)
-        }
-      } else if (err instanceof Error) {
-        errorMessage = err.message
-
-        if (logErrors) {
-          logException(err, component)
-        }
-      } else if (typeof err === "string") {
-        errorMessage = err
-
-        if (logErrors) {
-          logException(new Error(err), component)
-        }
-      } else {
-        if (logErrors) {
-          logException(new Error(errorMessage), component)
-        }
-      }
-
+      // Update error state
       setError({
         hasError: true,
-        message: errorMessage,
-        code: errorCode,
-        details: errorDetails,
+        message: displayMessage,
+        details: errorObj,
+        timestamp: new Date(),
       })
 
-      return errorMessage
+      // Call optional onError callback
+      if (options.onError) {
+        options.onError(errorObj, displayMessage)
+      }
+
+      return errorObj
     },
-    [logErrors, component],
+    [options],
   )
 
-  /**
-   * Clear the current error
-   */
   const clearError = useCallback(() => {
     setError({
       hasError: false,
@@ -83,28 +61,9 @@ export function useErrorHandler(options: ErrorHandlerOptions = {}) {
     })
   }, [])
 
-  /**
-   * Wrap an async function with error handling
-   */
-  const withErrorHandling = useCallback(
-    <T extends any[], R>(fn: (...args: T) => Promise<R>, customMessage?: string) => {
-      return async (...args: T): Promise<R | undefined> => {
-        try {
-          clearError()
-          return await fn(...args)
-        } catch (err) {
-          handleError(err, customMessage)
-          return undefined
-        }
-      }
-    },
-    [handleError, clearError],
-  )
-
   return {
     error,
     handleError,
     clearError,
-    withErrorHandling,
   }
 }

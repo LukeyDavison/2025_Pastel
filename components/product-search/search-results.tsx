@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, useEffect, memo } from "react"
-import { ChevronLeft, ChevronRight, Loader2, Download, Info, Check, Search } from "lucide-react"
+import { ChevronLeft, ChevronRight, Loader2, Download, Info, Check, Search, Database } from "lucide-react"
 import { deferExecution } from "@/utils/performance-utils"
 
 type ProductType = {
@@ -485,7 +485,7 @@ export function SearchResults({
     return (
       <div className="flex flex-col justify-center items-center py-12">
         <Loader2 className="h-8 w-8 text-white animate-spin mb-4" />
-        <p className="text-white">Loading LK Bennett products...</p>
+        <p className="text-white">Loading products...</p>
       </div>
     )
   }
@@ -494,7 +494,16 @@ export function SearchResults({
     return (
       <div className="text-center py-12 px-4">
         <p className="text-white text-lg">No products found</p>
-        <p className="text-white/80 text-sm mt-2">Try a different search term</p>
+        <p className="text-white/80 text-sm mt-2">Try a different search term or check your catalog</p>
+        <div className="mt-6">
+          <button
+            className="px-4 py-2 bg-white/20 hover:bg-white/30 rounded-md text-white flex items-center mx-auto"
+            onClick={() => document.getElementById("catalog-button")?.click()}
+          >
+            <Database className="h-4 w-4 mr-2" />
+            Open Catalog
+          </button>
+        </div>
       </div>
     )
   }
@@ -505,15 +514,20 @@ export function SearchResults({
         <Search className="h-16 w-16 text-white/40 mb-4" />
         <h3 className="text-white text-xl font-medium mb-2">Search for Products</h3>
         <p className="text-white/70 text-center max-w-md">
-          Enter a search term above to find LK Bennett products. Try searching for items like "dress", "shoes", or
-          "bag".
+          Enter a search term above to find products. Try searching for items like "dress", "shoes", or "bag".
         </p>
         <div className="mt-8 flex flex-wrap justify-center gap-2">
           {["Dress", "Shoes", "Bag", "Jacket", "Skirt"].map((term) => (
             <button
               key={term}
               className="px-3 py-1 bg-white/20 hover:bg-white/30 rounded-full text-white text-sm"
-              onClick={() => document.querySelector("input[type=search]")?.setAttribute("value", term)}
+              onClick={() => {
+                const input = document.querySelector("input[type=search]") as HTMLInputElement
+                if (input) {
+                  input.value = term
+                  input.dispatchEvent(new Event("input", { bubbles: true }))
+                }
+              }}
             >
               {term}
             </button>

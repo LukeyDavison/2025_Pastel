@@ -1,70 +1,114 @@
-// Performance utilities to help optimize the application
+/**
+ * Performance utilities for optimizing application performance
+ */
 
-// Defer execution to avoid blocking the main thread
-export function deferExecution(callback: () => void, delay = 0): void {
-  setTimeout(callback, delay)
+/**
+ * Defers execution of a function to the next tick to improve UI responsiveness
+ * @param fn The function to execute
+ * @param delay Optional delay in milliseconds
+ */
+export function deferExecution(fn: () => void, delay = 0): void {
+  setTimeout(fn, delay)
 }
 
-// Debounce function to limit how often a function can be called
-export function debounce<T extends (...args: any[]) => any>(func: T, wait: number): (...args: Parameters<T>) => void {
-  let timeout: ReturnType<typeof setTimeout> | null = null
-
-  return (...args: Parameters<T>): void => {
-    const later = () => {
-      timeout = null
-      func(...args)
-    }
-
-    if (timeout !== null) {
-      clearTimeout(timeout)
-    }
-
-    timeout = setTimeout(later, wait)
+/**
+ * Debounces a function to delay its execution until after a period of inactivity
+ * @param fn Function to debounce
+ * @param delay Delay in milliseconds
+ */
+export function debounce<T extends (...args: any[]) => any>(fn: T, delay: number): (...args: Parameters<T>) => void {
+  let timeout: NodeJS.Timeout
+  return (...args: Parameters<T>) => {
+    clearTimeout(timeout)
+    timeout = setTimeout(() => fn(...args), delay)
   }
 }
 
-// Throttle function to limit the rate at which a function can fire
-export function throttle<T extends (...args: any[]) => any>(func: T, limit: number): (...args: Parameters<T>) => void {
-  let inThrottle = false
-  let lastFunc: ReturnType<typeof setTimeout>
-  let lastRan: number
-
-  return (...args: Parameters<T>): void => {
-    if (!inThrottle) {
-      func(...args)
-      lastRan = Date.now()
-      inThrottle = true
-
-      setTimeout(() => {
-        inThrottle = false
-      }, limit)
-    } else {
-      clearTimeout(lastFunc)
-      lastFunc = setTimeout(
-        () => {
-          if (Date.now() - lastRan >= limit) {
-            func(...args)
-            lastRan = Date.now()
-          }
-        },
-        limit - (Date.now() - lastRan),
-      )
+/**
+ * Throttles a function to limit how often it can be called
+ * @param fn Function to throttle
+ * @param limit Time limit in milliseconds
+ */
+export function throttle<T extends (...args: any[]) => any>(fn: T, limit: number): (...args: Parameters<T>) => void {
+  let lastCall = 0
+  return (...args: Parameters<T>) => {
+    const now = Date.now()
+    if (now - lastCall >= limit) {
+      lastCall = now
+      return fn(...args)
     }
   }
 }
 
-// Measure execution time of a function
-export function measureExecutionTime<T extends (...args: any[]) => any>(
-  func: T,
-  label = "Execution time",
-): (...args: Parameters<T>) => ReturnType<T> {
-  return (...args: Parameters<T>): ReturnType<T> => {
-    const start = performance.now()
-    const result = func(...args)
-    const end = performance.now()
-
-    console.log(`${label}: ${(end - start).toFixed(2)}ms`)
-
-    return result
+/**
+ * Optimizes image loading by setting loading="lazy" and decoding="async"
+ * @param imgElement Image element to optimize
+ */
+export function optimizeImageLoading(imgElement: HTMLImageElement) {
+  if (imgElement) {
+    imgElement.loading = "lazy"
+    imgElement.decoding = "async"
   }
+}
+
+/**
+ * Optimizes all images in a container
+ * @param container Container element
+ */
+export function optimizeAllImages(container: HTMLElement) {
+  if (!container) return
+
+  const images = container.querySelectorAll("img")
+  images.forEach((img) => {
+    optimizeImageLoading(img)
+  })
+}
+
+/**
+ * Batches DOM operations to reduce layout thrashing
+ * @param operations Array of functions that perform DOM operations
+ */
+export function batchDOMOperations(operations: Array<() => void>) {
+  // Request animation frame to batch operations
+  requestAnimationFrame(() => {
+    // Force a style recalculation
+    document.body.getBoundingClientRect()
+
+    // Execute all operations
+    operations.forEach((operation) => operation())
+  })
+}
+
+/**
+ * Checks if the Intersection Observer API is available
+ */
+export function isIntersectionObserverSupported(): boolean {
+  return "IntersectionObserver" in window
+}
+
+/**
+ * Creates a lazy loader for elements using Intersection Observer
+ * @param callback Function to call when element is visible
+ * @param options Intersection Observer options
+ */
+export function createLazyLoader(
+  callback: (entry: IntersectionObserverEntry) => void,
+  options: IntersectionObserverInit = { rootMargin: "100px", threshold: 0 },
+) {
+  if (!isIntersectionObserverSupported()) {
+    return {
+      observe: () => {}, // No-op if not supported
+      unobserve: () => {},
+    }
+  }
+
+  const observer = new IntersectionObserver((entries) => {
+    entries.forEach((entry) => {
+      if (entry.isIntersecting) {
+        callback(entry)
+      }
+    })
+  }, options)
+
+  return observer
 }
